@@ -189,7 +189,7 @@ public class UI {
 				String[] stopdata = ArrivalManager.getBusStopPair().get(pane.getSelectedBusIndex()).get(pane.getSelectedBoundIndex()).get(pane.getSelectedStopIndex());
 				ArrivalManager arrman = null;
 				try {
-					arrman = new ArrivalManager(busno, stopdata[2], pane.getSelectedBoundIndex() + 1, ArrivalManager.ENGLISH_LANG);
+					arrman = new ArrivalManager(busno, stopdata[2], pane.getSelectedBoundIndex() + 1, ArrivalManager.ENGLISH_LANG, true);
 				} catch (Exception e) {
 					JOptionPane.showMessageDialog(frmKmbeta, "Error occurred: " + e, "Error", JOptionPane.ERROR_MESSAGE);
 					e.printStackTrace();
