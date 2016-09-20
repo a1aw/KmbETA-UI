@@ -11,7 +11,11 @@ import javax.swing.JComboBox;
 import javax.swing.LayoutStyle.ComponentPlacement;
 import javax.swing.SwingConstants;
 
-import com.mob41.kmbeta.api.ArrivalManager;
+import com.github.mob41.kmbeta.api.ArrivalManager;
+import com.github.mob41.kmbeta.api.BusDatabase;
+import com.github.mob41.kmbeta.api.BusStop;
+import com.github.mob41.kmbeta.api.Route;
+import com.github.mob41.kmbeta.api.RouteBound;
 
 import java.awt.Font;
 import java.awt.Graphics2D;
@@ -22,23 +26,35 @@ import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.net.URL;
 import java.util.Arrays;
+import java.util.List;
 import java.awt.event.ActionEvent;
+import java.awt.FlowLayout;
+import javax.swing.JProgressBar;
 
 public class AddMonitorPanel extends JPanel {
+	
+	private static final String SELECT_NONE = "--- Select ---";
 	private JComboBox busBox;
 	private JComboBox boundBox;
 	private JComboBox stopBox;
 	private JLabel lblImg;
+	private BusDatabase busDb;
+	private JLabel lblStatus;
+	private JProgressBar progressBar;
+	private JPanel statusPanel;
+	
+	private int language;
 
 	/**
 	 * Create the panel.
 	 */
-	public AddMonitorPanel() {
-		
-		if (ArrivalManager.getBusStopPair() == null){
-			boolean loaded = ArrivalManager.loadDatabase(this, true);
+	public AddMonitorPanel(int lang) {
+		this.language = lang;
+		busDb = ArrivalManager.getBusDatabase();
+		if (busDb.getRoutes() == null){
+			boolean loaded = busDb.loadWebDB();
 			if (!loaded){
-				JOptionPane.showMessageDialog(this, "Could not load database. Please fix this problem before using.\nApplication will now close.", "Error", JOptionPane.ERROR_MESSAGE);
+				JOptionPane.showMessageDialog(this, "Could not download database from \"db.kmbeta.ml\". Check your network connection.\nIf this problem still exists, \nApplication will now close.", "Error", JOptionPane.ERROR_MESSAGE);
 				System.exit(-1);
 			}
 		}
@@ -46,23 +62,32 @@ public class AddMonitorPanel extends JPanel {
 		JLabel lblBusNo = new JLabel("Bus No:");
 		lblBusNo.setHorizontalAlignment(SwingConstants.RIGHT);
 		
-		busBox = new JComboBox(ArrivalManager.BUS_NO);
+		busBox = new JComboBox(arrayAppend(busDb.getRoutesNames(), SELECT_NONE, true));
 		busBox.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent arg0) {
-				if (busBox.getSelectedIndex() == -1 || busBox.getSelectedItem() == null){
+				stopBox.removeAllItems();
+				boundBox.removeAllItems();
+				if (busBox.getSelectedIndex() == -1 || busBox.getSelectedItem() == null || busBox.getSelectedItem().equals(SELECT_NONE)){
 					return;
 				}
-				int bounds = ArrivalManager.getBusStopPair().get(busBox.getSelectedIndex()).size();
-				System.out.println(bounds);
+				
+				List<RouteBound> bl = busDb
+						.getRoutes()
+						.get(busBox.getSelectedIndex() - 1)
+						.getList();
+				
+				int bounds = bl.size();
+				
+				stopBox.removeAllItems();
 				boundBox.removeAllItems();
+				boundBox.addItem(SELECT_NONE);
+				List<BusStop> stops;
 				for (int i = 0; i < bounds; i++){
-					System.out.println(" == GEN == ");
-					int stopsize = ArrivalManager.getBusStopPair().get(busBox.getSelectedIndex()).get(i).size();
-					String firststop = ArrivalManager.getBusStopPair().get(busBox.getSelectedIndex()).get(i).get(0)[4];
-					String laststop = ArrivalManager.getBusStopPair().get(busBox.getSelectedIndex()).get(i).get(stopsize - 1)[4];
+					stops = bl.get(i).getList();
+					int stopsize = stops.size();
+					String firststop = language == 0 ? stops.get(0).getStopNameInEnglish() : stops.get(0).getAddressInChinese();
+					String laststop = stops.get(stops.size() - 1).getAddressInEnglish();
 					boundBox.addItem((i + 1) + ": " + firststop + " --> " + laststop);
-					System.out.println((i + 1) + ": " + firststop + " --> " + laststop);
-					System.out.println(" == END GEN == ");
 				}
 			}
 		});
@@ -73,28 +98,26 @@ public class AddMonitorPanel extends JPanel {
 		boundBox = new JComboBox();
 		boundBox.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent arg0) {
-				if (boundBox.getSelectedIndex() == -1 || boundBox.getSelectedItem() == null){
+				stopBox.removeAllItems();
+				if (boundBox.getSelectedIndex() == -1 || boundBox.getSelectedItem() == null || boundBox.getSelectedItem().equals(SELECT_NONE)){
 					return;
 				}
-				int stops = ArrivalManager.getBusStopPair().get(busBox.getSelectedIndex()).get(boundBox.getSelectedIndex()).size();
-				System.out.println("======= SELECTED BOUND: " + boundBox.getSelectedIndex());
-				stopBox.removeAllItems();
-				System.out.println("START GEN----------------");
+				
+				List<BusStop> sl = busDb
+						.getRoutes()
+						.get(busBox.getSelectedIndex() - 1)
+						.getList()
+						.get(boundBox.getSelectedIndex() - 1)
+						.getList();
+				
+				int stops = sl.size();
+				stopBox.addItem(SELECT_NONE);
+				
+				BusStop stop;
 				for (int i = 0; i < stops; i++){
-					System.out.println("== GEN stop ==");
-					String[] data = ArrivalManager.getBusStopPair().get(busBox.getSelectedIndex()).get(boundBox.getSelectedIndex()).get(i);
-					System.out.println(Arrays.deepToString(data));
-					System.out.println("Seq: " + data[3]);
-					String stopname = data[4];
-					System.out.println("Name: " + stopname);
-					String stopcode = data[2];
-					System.out.println("Code: " + stopcode);
-					String bound = data[1];
-					System.out.println("Bound: " + bound);
-					String text = data[3] + ": " + stopname + " (" + stopcode + ")";
-					System.out.println(text);
+					stop = sl.get(i);
+					String text = stop.getStopSeq() + ": " + (language == 0 ? stop.getStopNameInEnglish() : stop.getAddressInChinese()) + " (" + stop.getStopCode() + ")";
 					stopBox.addItem(text);
-					System.out.println("== END GEN stop ==");
 				}
 			}
 		});
@@ -105,13 +128,52 @@ public class AddMonitorPanel extends JPanel {
 		stopBox = new JComboBox();
 		stopBox.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent arg0) {
-				if (stopBox.getSelectedIndex() == -1 || stopBox.getSelectedItem() == null){
+				lblImg.setIcon(null);
+				lblImg.setText("KmbETA");
+				if (stopBox.getSelectedIndex() == -1 || stopBox.getSelectedItem() == null || stopBox.getSelectedItem().equals(SELECT_NONE)){
 					return;
 				}
-				String stopcode = ArrivalManager.getBusStopPair().get(busBox.getSelectedIndex()).get(boundBox.getSelectedIndex()).get(stopBox.getSelectedIndex())[2];
+				
+				BusStop stop = busDb
+						.getRoutes()
+						.get(busBox.getSelectedIndex() - 1)
+						.getList()
+						.get(boundBox.getSelectedIndex() - 1)
+						.getList()
+						.get(stopBox.getSelectedIndex() - 1);
+				
+				final String stopcode = stop.getStopCode();
 				lblImg.setText("");
-				BufferedImage image = grantImage(stopcode);
-				lblImg.setIcon(new ImageIcon(resize(image, 340, 255)));
+				
+				busBox.setEnabled(false);
+				boundBox.setEnabled(false);
+				stopBox.setEnabled(false);
+				
+				new Thread(){
+					public void run(){
+						lblStatus.setText("Status: Downloading image...");
+						progressBar.setIndeterminate(true);
+						statusPanel.setVisible(true);
+						
+						lblImg.setIcon(null);
+						lblImg.setText("...");
+						
+						BufferedImage image = grantImage(stopcode);
+						if (image == null){
+							lblImg.setText("No image");
+						} else {
+							lblImg.setText("");
+							lblImg.setIcon(new ImageIcon(resize(image, 340, 255)));
+						}
+						
+						lblStatus.setText("Status: Ready");
+						progressBar.setIndeterminate(false);
+						
+						busBox.setEnabled(true);
+						boundBox.setEnabled(true);
+						stopBox.setEnabled(true);
+					}
+				}.start();
 			}
 		});
 		
@@ -119,23 +181,27 @@ public class AddMonitorPanel extends JPanel {
 		lblImg.setForeground(Color.RED);
 		lblImg.setFont(new Font("Tahoma", Font.PLAIN, 68));
 		lblImg.setHorizontalAlignment(SwingConstants.CENTER);
+		
+		statusPanel = new JPanel();
+		statusPanel.setVisible(false);
 		GroupLayout groupLayout = new GroupLayout(this);
 		groupLayout.setHorizontalGroup(
 			groupLayout.createParallelGroup(Alignment.LEADING)
 				.addGroup(groupLayout.createSequentialGroup()
 					.addContainerGap()
-					.addGroup(groupLayout.createParallelGroup(Alignment.TRAILING)
-						.addComponent(lblImg, GroupLayout.DEFAULT_SIZE, 458, Short.MAX_VALUE)
+					.addGroup(groupLayout.createParallelGroup(Alignment.LEADING)
+						.addComponent(lblImg, Alignment.TRAILING, GroupLayout.DEFAULT_SIZE, 430, Short.MAX_VALUE)
 						.addGroup(groupLayout.createSequentialGroup()
 							.addGroup(groupLayout.createParallelGroup(Alignment.LEADING)
 								.addComponent(lblBusNo, GroupLayout.PREFERRED_SIZE, GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-								.addComponent(lblBound, GroupLayout.DEFAULT_SIZE, 37, Short.MAX_VALUE)
-								.addComponent(lblStop, GroupLayout.DEFAULT_SIZE, 37, Short.MAX_VALUE))
+								.addComponent(lblBound, GroupLayout.DEFAULT_SIZE, 38, Short.MAX_VALUE)
+								.addComponent(lblStop, GroupLayout.DEFAULT_SIZE, 38, Short.MAX_VALUE))
 							.addPreferredGap(ComponentPlacement.RELATED)
 							.addGroup(groupLayout.createParallelGroup(Alignment.LEADING)
-								.addComponent(stopBox, 0, 417, Short.MAX_VALUE)
-								.addComponent(busBox, Alignment.TRAILING, 0, 417, Short.MAX_VALUE)
-								.addComponent(boundBox, 0, 417, Short.MAX_VALUE))))
+								.addComponent(stopBox, 0, 388, Short.MAX_VALUE)
+								.addComponent(busBox, Alignment.TRAILING, 0, 388, Short.MAX_VALUE)
+								.addComponent(boundBox, 0, 388, Short.MAX_VALUE)))
+						.addComponent(statusPanel, GroupLayout.DEFAULT_SIZE, 430, Short.MAX_VALUE))
 					.addContainerGap())
 		);
 		groupLayout.setVerticalGroup(
@@ -154,25 +220,32 @@ public class AddMonitorPanel extends JPanel {
 						.addComponent(lblStop)
 						.addComponent(stopBox, GroupLayout.DEFAULT_SIZE, 29, Short.MAX_VALUE))
 					.addPreferredGap(ComponentPlacement.RELATED)
-					.addComponent(lblImg, GroupLayout.DEFAULT_SIZE, 326, Short.MAX_VALUE)
+					.addComponent(lblImg, GroupLayout.DEFAULT_SIZE, 327, Short.MAX_VALUE)
+					.addPreferredGap(ComponentPlacement.RELATED)
+					.addComponent(statusPanel, GroupLayout.DEFAULT_SIZE, 25, Short.MAX_VALUE)
 					.addContainerGap())
 		);
-		setLayout(groupLayout);
+		statusPanel.setLayout(new FlowLayout(FlowLayout.CENTER, 5, 5));
 		
-		busBox.setSelectedIndex(0);
+		lblStatus = new JLabel("Status: None");
+		statusPanel.add(lblStatus);
+		
+		progressBar = new JProgressBar();
+		statusPanel.add(progressBar);
+		setLayout(groupLayout);
 		
 	}
 	
 	public int getSelectedBusIndex(){
-		return busBox.getSelectedIndex();
+		return busBox.getSelectedIndex() != -1 ? busBox.getSelectedIndex() - 1 : -1;
 	}
 	
 	public int getSelectedBoundIndex(){
-		return boundBox.getSelectedIndex();
+		return boundBox.getSelectedIndex() != -1 ? boundBox.getSelectedIndex() - 1 : -1;
 	}
 	
 	public int getSelectedStopIndex(){
-		return stopBox.getSelectedIndex();
+		return stopBox.getSelectedIndex() != -1 ? stopBox.getSelectedIndex() - 1 : -1;
 	}
 	
 	private static BufferedImage grantImage(String stopcode){
@@ -204,5 +277,29 @@ public class AddMonitorPanel extends JPanel {
 	    g2d.dispose();
 
 	    return dimg;
-	}  
+	} 
+	
+	public static String[] arrayAppend(String[] original, String appendStr, boolean appendAtFront){
+		if (original == null){
+			return new String[]{appendStr};
+		} else if (appendStr == null){
+			return original;
+		}
+		
+		String[] out = new String[original.length + 1];
+		
+		if (appendAtFront){
+			out[0] = appendStr;
+			for (int i = 0; i < original.length; i++){
+				out[i + 1] = original[i];
+			}
+		} else {
+			for (int i = 0; i < original.length; i++){
+				out[i] = original[i];
+			}
+			out[out.length - 1] = appendStr;
+		}
+		
+		return out;
+	}
 }

@@ -16,7 +16,10 @@ import java.awt.Image;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.image.BufferedImage;
+import java.io.File;
 import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URL;
 import java.util.Arrays;
 import java.util.Calendar;
@@ -24,6 +27,7 @@ import java.util.Calendar;
 import javax.swing.LayoutStyle.ComponentPlacement;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Desktop;
 
 import javax.swing.SwingConstants;
 import javax.swing.Timer;
@@ -31,11 +35,11 @@ import javax.swing.JPanel;
 import javax.swing.border.TitledBorder;
 import javax.swing.table.DefaultTableModel;
 
-import com.mob41.kmbeta.api.ArrivalManager;
-import com.mob41.kmbeta.api.MultiArrivalManager;
-import com.mob41.kmbeta.exception.CouldNotLoadDatabaseException;
-import com.mob41.kmbeta.exception.InvalidArrivalTargetException;
-import com.mob41.kmbeta.exception.InvalidException;
+import com.github.mob41.kmbeta.api.ArrivalManager;
+import com.github.mob41.kmbeta.api.BusDatabase;
+import com.github.mob41.kmbeta.api.BusStop;
+import com.github.mob41.kmbeta.api.MultiArrivalManager;
+import com.github.mob41.kmbeta.api.Route;
 
 import javax.swing.JButton;
 import javax.swing.JProgressBar;
@@ -44,8 +48,15 @@ import java.awt.BorderLayout;
 import javax.swing.JCheckBox;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
+import java.awt.CardLayout;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 
 public class UI {
+
+	private static final String copyright = "Copyright (c) 2016 Anthony Law";
+	
+	private static final String API_VERSION = "1.0.0-SNAPSHOT";
 	
 	private static final String[] colident = {"Icon", "Name", "Location", "Arrival", "ETA"};
 	
@@ -60,6 +71,8 @@ public class UI {
 	private int textIndex = 50;
 	
 	private String[] slideText = null;
+	
+	private boolean updating = false;
 
 	private ActionListener textChange = new ActionListener(){
 
@@ -81,24 +94,68 @@ public class UI {
 		
 	};
 	
+	private int language = 0;
+	
 	private ActionListener update = new ActionListener(){
 
 		public void actionPerformed(ActionEvent arg0) {
-			System.out.println("Updating! " + Calendar.getInstance().getTimeInMillis());
-			mularr.fetchAllData();
-			for (int i = 0; i < monitorTable.getRowCount(); i++){
-				ArrivalManager arrman = mularr.getArrivalManagers().get(i);
-				try {
-					monitorTableModel.setValueAt(arrman.getArrivalTime_Formatted(), i, 3);
-					monitorTableModel.setValueAt(arrman.getArrivalTimeRemaining_Formatted(), i, 4);
-				} catch (Exception e){
-					JOptionPane.showMessageDialog(frmKmbeta, "Error occurred: " + e, "Error", JOptionPane.ERROR_MESSAGE);
-					e.printStackTrace();
-					return;
-				}
+			if (!updating){
+				System.out.println("Not updating. Start thread update");
+				new Thread(){
+					public void run(){
+						if (!updating){
+							updating = true;
+							
+							if (monitorTable.getRowCount() <= 0){
+								updating = false;
+								return;
+							}
+							
+							progressBar.setValue(0);
+							progressBar.setIndeterminate(false);
+							lblStatus.setText("Status: Updating...");
+							int per = 100 / monitorTable.getRowCount();
+							statusPanel.setVisible(true);
+							
+							for (int i = 0; i < mularr.getArrivalManagers().size(); i++){
+								mularr.getArrivalManagers().get(i).fetchNewData();
+								progressBar.setValue(per * (i + 1));
+							}
+							
+							for (int i = 0; i < monitorTable.getRowCount(); i++){
+								ArrivalManager arrman = mularr.getArrivalManagers().get(i);
+								try {
+									monitorTableModel.setValueAt(arrman.getArrivalTimeText(), i, 3);
+									monitorTableModel.setValueAt(arrman.getRemainingArrivalMinuteText(), i, 4);
+								} catch (Exception e){
+									JOptionPane.showMessageDialog(frmKmbeta, "Error occurred: " + e, "Error", JOptionPane.ERROR_MESSAGE);
+									e.printStackTrace();
+									return;
+								}
+							}
+							monitorTableModel.fireTableDataChanged();
+							updateRowHeights(monitorTable);
+							
+							lblStatus.setText("Status: Ready");
+							
+							new Thread(){
+								public void run(){
+									try {
+										sleep(1000);
+									} catch (InterruptedException ignore){}
+									statusPanel.setVisible(false);
+								}
+							}.start();
+							
+							System.out.println("Updating success");
+							
+							updating = false;
+						}
+					}
+				}.start();
+			} else {
+				System.out.println("Still updating... skipping thread start");
 			}
-			monitorTableModel.fireTableDataChanged();
-			updateRowHeights(monitorTable);
 		}
 		
 	};
@@ -107,6 +164,13 @@ public class UI {
 	private JPanel statusPanel;
 	private JTable monitorTable;
 	private DefaultTableModel monitorTableModel;
+	private JLabel lblStatus;
+	private JProgressBar progressBar;
+	private JScrollPane monitorListScroll;
+	private JPanel blockingPanel;
+	private JButton btnAddNewMonitor;
+	private JButton btnRemoveMonitor;
+	private JLabel lblVersion;
 	
 	private static String[] processSlideText(String text, int max){
 		for (int i = 0; i < max; i++){
@@ -163,8 +227,18 @@ public class UI {
 		JPanel decPanel1 = new JPanel();
 		decPanel1.setBackground(Color.RED);
 		
-		JLabel lblVersionV = new JLabel("App Ver: v2.0  Internal Database Ver: v0.2 API Ver: v0.2");
-		lblVersionV.setHorizontalAlignment(SwingConstants.CENTER);
+		lblVersion = new JLabel(copyright);
+		lblVersion.addMouseListener(new MouseAdapter() {
+			@Override
+			public void mousePressed(MouseEvent e) {
+				try {
+					Desktop.getDesktop().browse(new URI("https://github.com/mob41/KmbETA-API"));
+				} catch (Exception e1){
+					JOptionPane.showMessageDialog(frmKmbeta, "Error when opening URL: " + e1, "Error", JOptionPane.ERROR_MESSAGE);
+				}
+			}
+		});
+		lblVersion.setHorizontalAlignment(SwingConstants.CENTER);
 		
 		lblKmbeta = new JLabel("KmbETA");
 		lblKmbeta.setHorizontalAlignment(SwingConstants.CENTER);
@@ -177,36 +251,49 @@ public class UI {
 		JPanel monitorListPanel = new JPanel();
 		monitorListPanel.setBorder(new TitledBorder(null, "Monitoring", TitledBorder.LEADING, TitledBorder.TOP, null, null));
 		
-		JButton btnAddNewMonitor = new JButton("Add new monitor");
+		btnAddNewMonitor = new JButton("Add new monitor");
+		btnAddNewMonitor.setEnabled(false);
 		btnAddNewMonitor.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent arg0) {
-				AddMonitorPanel pane = new AddMonitorPanel();
+				AddMonitorPanel pane = new AddMonitorPanel(language);
+				
+				BusDatabase busDb = ArrivalManager.getBusDatabase();
+				
 				int result = JOptionPane.showOptionDialog(frmKmbeta, pane, "Add new monitor", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE, null, new String[]{"OK", "Cancel"}, 1);
-				if (result != 0){
+				if (result != 0 ||
+						pane.getSelectedBusIndex() == -1 ||
+						pane.getSelectedBoundIndex() == -1 ||
+						pane.getSelectedStopIndex() == -1 
+						){
 					return;
 				}
-				String busno = ArrivalManager.BUS_NO[pane.getSelectedBusIndex()];
-				String[] stopdata = ArrivalManager.getBusStopPair().get(pane.getSelectedBusIndex()).get(pane.getSelectedBoundIndex()).get(pane.getSelectedStopIndex());
+				
+				String busno = busDb.getRoutesNames()[pane.getSelectedBusIndex()];
+				
+				BusStop busStop = busDb.getRoutes()
+						.get(pane.getSelectedBusIndex())
+						.getBound(pane.getSelectedBoundIndex())
+						.getBusStop(pane.getSelectedStopIndex());
+				
 				ArrivalManager arrman = null;
 				try {
-					arrman = new ArrivalManager(busno, stopdata[2], pane.getSelectedBoundIndex() + 1, ArrivalManager.ENGLISH_LANG, true);
+					arrman = new ArrivalManager(busno, busStop.getStopCode(), pane.getSelectedBoundIndex(), ArrivalManager.ENGLISH_LANG, true);
 				} catch (Exception e) {
 					JOptionPane.showMessageDialog(frmKmbeta, "Error occurred: " + e, "Error", JOptionPane.ERROR_MESSAGE);
 					e.printStackTrace();
 					return;
 				}
 				mularr.addArrivalManager(arrman);
-				mularr.fetchAllData();
 				arrman.getServerTime();
-				BufferedImage image = grantImage(stopdata[2]);
+				BufferedImage image = grantImage(busStop.getStopCode());
 				image = resize(image, 135, 75);
 				Object[] data = new Object[5];
 				try {
 					data[0] = new ImageIcon(image);
 					data[1] = busno;
-					data[2] = stopdata[4];
-					data[3] = arrman.getArrivalTime_Formatted();
-					data[4] = arrman.getArrivalTimeRemaining_Formatted();
+					data[2] = language == 0 ? busStop.getStopNameInEnglish() : busStop.getAddressInChinese();
+					data[3] = arrman.getArrivalTimeText();
+					data[4] = arrman.getRemainingArrivalMinuteText();
 				} catch (Exception e){
 					JOptionPane.showMessageDialog(frmKmbeta, "Error occurred: " + e, "Error", JOptionPane.ERROR_MESSAGE);
 					e.printStackTrace();
@@ -218,7 +305,8 @@ public class UI {
 			}
 		});
 		
-		JButton btnRemoveMonitor = new JButton("Remove monitor");
+		btnRemoveMonitor = new JButton("Remove monitor");
+		btnRemoveMonitor.setEnabled(false);
 		btnRemoveMonitor.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent arg0) {
 				if (monitorTable.getSelectedRow() != -1){
@@ -246,7 +334,7 @@ public class UI {
 							.addPreferredGap(ComponentPlacement.RELATED)
 							.addGroup(groupLayout.createParallelGroup(Alignment.LEADING)
 								.addComponent(decPanel1, GroupLayout.DEFAULT_SIZE, 574, Short.MAX_VALUE)
-								.addComponent(lblVersionV, GroupLayout.DEFAULT_SIZE, 574, Short.MAX_VALUE)))
+								.addComponent(lblVersion, GroupLayout.DEFAULT_SIZE, 574, Short.MAX_VALUE)))
 						.addComponent(decPanel2, GroupLayout.DEFAULT_SIZE, 715, Short.MAX_VALUE)
 						.addComponent(monitorListPanel, GroupLayout.DEFAULT_SIZE, 715, Short.MAX_VALUE)
 						.addGroup(groupLayout.createSequentialGroup()
@@ -263,7 +351,7 @@ public class UI {
 					.addContainerGap()
 					.addGroup(groupLayout.createParallelGroup(Alignment.TRAILING)
 						.addGroup(groupLayout.createSequentialGroup()
-							.addComponent(lblVersionV)
+							.addComponent(lblVersion)
 							.addPreferredGap(ComponentPlacement.RELATED)
 							.addComponent(decPanel1, GroupLayout.PREFERRED_SIZE, 24, GroupLayout.PREFERRED_SIZE))
 						.addComponent(lblKmbeta))
@@ -279,20 +367,7 @@ public class UI {
 					.addContainerGap())
 		);
 		
-		JScrollPane monitorListScroll = new JScrollPane();
-		GroupLayout gl_monitorListPanel = new GroupLayout(monitorListPanel);
-		gl_monitorListPanel.setHorizontalGroup(
-			gl_monitorListPanel.createParallelGroup(Alignment.LEADING)
-				.addGroup(gl_monitorListPanel.createSequentialGroup()
-					.addGap(2)
-					.addComponent(monitorListScroll, GroupLayout.DEFAULT_SIZE, 613, Short.MAX_VALUE))
-		);
-		gl_monitorListPanel.setVerticalGroup(
-			gl_monitorListPanel.createParallelGroup(Alignment.LEADING)
-				.addGroup(gl_monitorListPanel.createSequentialGroup()
-					.addGap(2)
-					.addComponent(monitorListScroll, GroupLayout.DEFAULT_SIZE, 241, Short.MAX_VALUE))
-		);
+		monitorListScroll = new JScrollPane();
 		
 		monitorTableModel = new DefaultTableModel();
 		monitorTable = new JTable(monitorTableModel){
@@ -307,29 +382,115 @@ public class UI {
 		};
 		monitorTable.setFont(new Font("Tahoma", Font.PLAIN, 27));
 		monitorTableModel.setColumnIdentifiers(colident);
+		monitorListPanel.setLayout(new CardLayout(0, 0));
 		monitorListScroll.setViewportView(monitorTable);
-		monitorListPanel.setLayout(gl_monitorListPanel);
+		monitorListPanel.add(monitorListScroll, "name_168879057220579");
+		monitorListScroll.setVisible(false);
+		
+		blockingPanel = new JPanel();
+		monitorListPanel.add(blockingPanel, "name_169100630683037");
+		blockingPanel.setLayout(new BorderLayout(0, 0));
+		blockingPanel.setVisible(true);
+		
+		JLabel lblJustAWhile = new JLabel("Just a while...");
+		lblJustAWhile.setFont(new Font("PMingLiU", Font.PLAIN, 28));
+		lblJustAWhile.setHorizontalAlignment(SwingConstants.CENTER);
+		blockingPanel.add(lblJustAWhile, BorderLayout.CENTER);
 		decPanel1.setLayout(new BorderLayout(0, 0));
 		
 		statusPanel = new JPanel();
+		statusPanel.setVisible(false);
 		statusPanel.setBackground(Color.RED);
 		decPanel1.add(statusPanel, BorderLayout.NORTH);
 		
-		JLabel lblStatus = new JLabel("Status: None");
+		lblStatus = new JLabel("Status: None");
 		lblStatus.setFont(new Font("Tahoma", Font.BOLD, 11));
 		lblStatus.setForeground(Color.WHITE);
 		statusPanel.add(lblStatus);
 		
-		JProgressBar progressBar = new JProgressBar();
+		progressBar = new JProgressBar();
 		statusPanel.add(progressBar);
 		frmKmbeta.getContentPane().setLayout(groupLayout);
 		
 		textTimer = new Timer(250, textChange);
 		textTimer.start();
-		
-		statusPanel.setVisible(false);
 		updateTimer = new Timer(10000, update);
 		updateTimer.start();
+		
+		EventQueue.invokeLater(new Runnable(){
+			public void run(){
+				language = JOptionPane.showOptionDialog(frmKmbeta, "Choose your database language (Not UI):", "Database Language chooser", JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE, null, new String[]{"English", "Traditional Chinese"}, 0);
+				if (language != 0 && language != 1){
+					System.exit(0);
+					return;
+				}
+				new Thread(){
+					public void run(){
+						lblStatus.setText("Status: Downloading database...");
+						progressBar.setValue(50);
+						progressBar.setIndeterminate(true);
+						statusPanel.setVisible(true);
+						
+						String prefix = "";
+						boolean fileLoaded = false;
+						if (new File("kmbeta_db.json").exists()){
+							int option = JOptionPane.showConfirmDialog(frmKmbeta, "A database file \"kmbeta_db.json\" is detected. Do you want to load it instead of the web database?\nA web database is more recommended.", "Load from file?", JOptionPane.YES_NO_CANCEL_OPTION);
+							if (option == 0){
+								if (!ArrivalManager.getBusDatabase().loadDatabase(null, false)){
+									JOptionPane.showMessageDialog(frmKmbeta, "Unable to load from file \"kmbeta_db.json\". \nApplication will now close.", "Error", JOptionPane.ERROR_MESSAGE);
+									System.exit(-1);
+									return;
+								} else {
+									prefix += "[Offline Database] ";
+									fileLoaded = true;
+								}
+							} else if (option == 1) {
+								fileLoaded = false;
+							} else {
+								System.exit(-1);
+								return;
+							}
+						}
+						
+						if (!fileLoaded){
+							boolean loaded = ArrivalManager.getBusDatabase().loadWebDB();
+							if (!loaded){
+								int option = JOptionPane.showConfirmDialog(frmKmbeta, "Could not download database from \"db.kmbeta.ml\".\nIf you want to load from file, press \"Yes\".\nOtherwise, the application will close.", "Load from file?", JOptionPane.YES_NO_OPTION);
+								if (option == 0){
+									if (!ArrivalManager.getBusDatabase().loadDatabase(null, false)){
+										JOptionPane.showMessageDialog(frmKmbeta, "Unable to load from file \"kmbeta_db.json\". \nApplication will now close.", "Error", JOptionPane.ERROR_MESSAGE);
+										System.exit(-1);
+										return;
+									}
+									prefix += "[Offline Database] ";
+								} else {
+									System.exit(-1);
+									return;
+								}
+							}
+						}
+						progressBar.setIndeterminate(false);
+						progressBar.setValue(100);
+						lblStatus.setText("Status: Ready");
+						
+						lblVersion.setText(
+								prefix + "DB: " + ArrivalManager.getBusDatabase().getPureJSON().getString("generated_human") +
+								" API: " + API_VERSION
+						);
+						
+						btnAddNewMonitor.setEnabled(true);
+						btnRemoveMonitor.setEnabled(true);
+						blockingPanel.setVisible(false);
+						monitorListScroll.setVisible(true);
+						try {
+							sleep(2000);
+						} catch (InterruptedException ignore) {}
+						statusPanel.setVisible(false);
+						
+					}
+				}.start();
+			}
+		});
 	}
 	
 	private static BufferedImage grantImage(String stopcode){
